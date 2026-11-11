@@ -1,0 +1,55 @@
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app_password}
+      POSTGRES_DB: ${POSTGRES_DB:-app_db}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PORT: 3001
+      DATABASE_URL: postgresql://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app_password}@db:5432/${POSTGRES_DB:-app_db}
+      DOCS_USERNAME: ${DOCS_USERNAME:-admin}
+      DOCS_PASSWORD: ${DOCS_PASSWORD:-password}
+    ports:
+      - "${PORT:-3001}:3001"
+
+  studio:
+    build: .
+    restart: unless-stopped
+    command: ["bunx", "prisma", "studio", "--port", "5555", "--browser", "none"]
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app_password}@db:5432/${POSTGRES_DB:-app_db}
+    ports:
+      - "127.0.0.1:5555:5556"
+
+  studio-proxy:
+    image: alpine/socat
+    restart: unless-stopped
+    command: ["TCP-LISTEN:5556,bind=0.0.0.0,reuseaddr,fork", "TCP:127.0.0.1:5555"]
+    network_mode: "service:studio"
+    depends_on:
+      studio:
+        condition: service_started
+
+volumes:
+  postgres_data:
